@@ -10,8 +10,7 @@ router = APIRouter()
 
 PROJECT_ID = "lifeguard-ai-1dff7"
 FIRESTORE_BASE_URL = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
-SERVER_IP = "causal-stardom-gestation.ngrok-free.dev"
-
+SERVER_IP = "lifeguard-backend-lii5.onrender.com"
 def firestore_get(collection: str, doc_id: str = ""):
     url = f"{FIRESTORE_BASE_URL}/{collection}" + (f"/{doc_id}" if doc_id else "")
     try:
