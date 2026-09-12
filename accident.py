@@ -568,73 +568,105 @@ def police_portal(request_id: str, attempt: int = 0):
     """
     return HTMLResponse(content=html_content)
 
-@router.get("/hospital-action/{request_id}")
-def handle_hospital_action(request_id: str, attempt: int = 0, action: str = "accept"):
-    doc = firestore_get("emergency_requests", request_id)
-    if not doc: return HTMLResponse("Not Found", status_code=404)
-    req = parse_doc(doc)
-    lat = req.get("latitude", 9.1724)
-    lon = req.get("longitude", 77.8682)
-    user_id = req.get("user_id", 1)
-
-    if action == "accept":
-        ranked = get_ranked_hospitals(lat, lon, attempt)
-        accepted_hosp = ranked[attempt % len(ranked)]
+def get_ranked_hospitals(latitude, longitude, attempt=0):
+    ranked = []
+    try:
+        radii = [15000, 35000, 70000]
+        radius = radii[attempt] if attempt < len(radii) else radii[-1]
         
-        firestore_patch("emergency_requests", request_id, {
-            "hospital_status": "ACCEPTED",
-            "status": "ACCEPTED",
-            "hospital_name": accepted_hosp["name"],
+        overpass_url = "http://overpass-api.de/api/interpreter"
+        query = f"""
+        [out:json][timeout:10];
+        (
+          node["amenity"="hospital"](around:{radius},{latitude},{longitude});
+          way["amenity"="hospital"](around:{radius},{latitude},{longitude});
+          relation["amenity"="hospital"](around:{radius},{latitude},{longitude});
+          node["healthcare"="hospital"](around:{radius},{latitude},{longitude});
+          way["healthcare"="hospital"](around:{radius},{latitude},{longitude});
+          node["amenity"="clinic"](around:{radius},{latitude},{longitude});
+        );
+        out body;
+        """
+        response = requests.post(overpass_url, data=query, timeout=12)
+        if response.status_code == 200:
+            elements = response.json().get("elements", [])
+            for el in elements:
+                lat = el.get("lat") or el.get("center", {}).get("lat")
+                lon = el.get("lon") or el.get("center", {}).get("lon")
+                tags = el.get("tags", {})
+                # ஒரிஜினல் பெயர் அல்லது ஆபரேட்டர் பெயரை எடுக்கவும்
+                name = tags.get("name") or tags.get("name:en") or tags.get("operator")
+                if lat and lon and name:
+                    dist = calculate_distance(latitude, longitude, lat, lon)
+                    if not any(h['name'] == name for h in ranked):
+                        ranked.append({
+                            "name": name,
+                            "phone": "7708917685",
+                            "latitude": lat,
+                            "longitude": lon,
+                            "distance_km": dist
+                        })
+    except Exception as e:
+        print(f"Overpass API Hospital Error: {e}")
+
+    # ஒருவேளை ஓவர்வாட்ச் ஏபிஐ-ல் பெயர் கிடைக்கவில்லை என்றால், லொகேஷனை அடிப்படையாக வைத்து டைனமிக்காக பெயர் உருவாக்கப்படும்
+    if not ranked:
+        ranked.append({
+            "name": f"Medical Center (Lat: {round(latitude, 3)}, Lon: {round(longitude, 3)})",
+            "phone": "7708917685",
+            "latitude": latitude + 0.01,
+            "longitude": longitude + 0.01,
+            "distance_km": 1.5 * (attempt + 1)
         })
 
-        contacts_res = firestore_get(f"users/{user_id}/contacts")
-        phone_list = []
-        if contacts_res and "documents" in contacts_res:
-            for c in contacts_res["documents"]:
-                p = parse_doc(c).get("phone")
-                if p: phone_list.append(str(p))
+    ranked.sort(key=lambda x: x["distance_km"])
+    return ranked
 
-        hosp_maps = f"https://maps.google.com/?q={accepted_hosp['latitude']},{accepted_hosp['longitude']}"
-        # இங்கு உண்மையான மருத்துவமனை பெயர் மற்றும் கூகுள் மேப் லொகேஷன் சேர்த்து அனுப்பப்படுகிறது
-        success_msg = f"✅ SAFE UPDATE: '{accepted_hosp['name']}' has ACCEPTED and ambulance dispatched! Hospital Map: {hosp_maps}"
-        send_real_sms("Family (Hospital Accepted)", phone_list, success_msg)
-
-        return RedirectResponse(f"/hospital-portal/{request_id}?attempt={attempt}", status_code=303)
-    else:
-        next_attempt = attempt + 1
-        return RedirectResponse(f"/hospital-portal/{request_id}?attempt={next_attempt}", status_code=303)
-
-@router.get("/police-action/{request_id}")
-def handle_police_action(request_id: str, attempt: int = 0, action: str = "accept"):
-    doc = firestore_get("emergency_requests", request_id)
-    if not doc: return HTMLResponse("Not Found", status_code=404)
-    req = parse_doc(doc)
-    lat = req.get("latitude", 9.1724)
-    lon = req.get("longitude", 77.8682)
-    user_id = req.get("user_id", 1)
-
-    if action == "accept":
-        ranked = get_ranked_police_stations(lat, lon, attempt)
-        accepted_police = ranked[attempt % len(ranked)]
+def get_ranked_police_stations(latitude, longitude, attempt=0):
+    ranked = []
+    try:
+        radii = [15000, 35000, 70000]
+        radius = radii[attempt] if attempt < len(radii) else radii[-1]
         
-        firestore_patch("emergency_requests", request_id, {
-            "police_status": "ACCEPTED",
-            "police_name": accepted_police["name"],
+        overpass_url = "http://overpass-api.de/api/interpreter"
+        query = f"""
+        [out:json][timeout:10];
+        (
+          node["amenity"="police"](around:{radius},{latitude},{longitude});
+          way["amenity"="police"](around:{radius},{latitude},{longitude});
+          relation["amenity"="police"](around:{radius},{latitude},{longitude});
+        );
+        out body;
+        """
+        response = requests.post(overpass_url, data=query, timeout=12)
+        if response.status_code == 200:
+            elements = response.json().get("elements", [])
+            for el in elements:
+                lat = el.get("lat") or el.get("center", {}).get("lat")
+                lon = el.get("lon") or el.get("center", {}).get("lon")
+                tags = el.get("tags", {})
+                name = tags.get("name") or tags.get("name:en") or tags.get("operator")
+                if lat and lon and name:
+                    dist = calculate_distance(latitude, longitude, lat, lon)
+                    if not any(p['name'] == name for p in ranked):
+                        ranked.append({
+                            "name": name,
+                            "phone": "9363928690",
+                            "latitude": lat,
+                            "longitude": lon,
+                            "distance_km": dist
+                        })
+    except Exception as e:
+        print(f"Overpass API Police Error: {e}")
+
+    if not ranked:
+        ranked.append({
+            "name": f"Police Station (Lat: {round(latitude, 3)}, Lon: {round(longitude, 3)})",
+            "phone": "9363928690",
+            "latitude": latitude + 0.012,
+            "longitude": longitude + 0.012,
+            "distance_km": 2.0 * (attempt + 1)
         })
 
-        contacts_res = firestore_get(f"users/{user_id}/contacts")
-        phone_list = []
-        if contacts_res and "documents" in contacts_res:
-            for c in contacts_res["documents"]:
-                p = parse_doc(c).get("phone")
-                if p: phone_list.append(str(p))
-
-        police_maps = f"https://maps.google.com/?q={accepted_police['latitude']},{accepted_police['longitude']}"
-        # இங்கு உண்மையான போலீஸ் ஸ்டேஷன் பெயர் மற்றும் லொகேஷன் சேர்த்து அனுப்பப்படுகிறது
-        family_msg = f"🛡️ SAFE UPDATE: Police Station '{accepted_police['name']}' has ACCEPTED & DEPLOYED patrol unit! Station Map: {police_maps}"
-        send_real_sms("Family (Police Accepted)", phone_list, family_msg)
-
-        return RedirectResponse(f"/police-portal/{request_id}?attempt={attempt}", status_code=303)
-    else:
-        next_attempt = attempt + 1
-        return RedirectResponse(f"/police-portal/{request_id}?attempt={next_attempt}", status_code=303)
+    ranked.sort(key=lambda x: x["distance_km"])
+    return ranked
