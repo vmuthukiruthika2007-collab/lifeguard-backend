@@ -107,11 +107,9 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     a = (math.sin(dlat / 2) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2)
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return round(R * c, 2)
-
 def get_ranked_hospitals(latitude, longitude, attempt=0):
     ranked = []
     try:
-        # attempt அதிகமாகும்போது ரேடியஸை பெரிதாக்குகிறோம் (15km -> 40km -> 80km)
         radii = [15000, 40000, 80000]
         radius = radii[attempt] if attempt < len(radii) else radii[-1]
         
@@ -136,23 +134,22 @@ def get_ranked_hospitals(latitude, longitude, attempt=0):
                     dist = calculate_distance(latitude, longitude, lat, lon)
                     ranked.append({
                         "name": name,
-                        "phone": "9942119544", # உங்கள் டெஸ்ட் எண்களை இங்கு வைத்துக் கொள்ளலாம்
+                        "phone": "7708917685",
                         "latitude": lat,
                         "longitude": lon,
                         "distance_km": dist
                     })
     except Exception as e:
-        print(f"Overpass API Error: {e}")
+        print(f"Overpass API Hospital Error: {e}")
 
-    # ஒருவேளை ஓவர்வாட்ச் ஏபிஐ-ல் டேட்டா கிடைக்கவில்லை என்றால், யூசர் நின்ற அதே லொகேஷனை மையமாக வைத்து டைனமிக்காக அருகில் ஒரு ஜெனரிக் பாயிண்ட் உருவாக்கப்படும் (Static பெயர்கள் இருக்காது)
+    # ஓவர்வாட்ச் ஏபிஐ-ல் டேட்டா கிடைக்கவில்லை என்றால் மட்டும் ஃபால்பக் பெயர்
     if not ranked:
-        mult = (attempt + 1) * 1.0
         ranked.append({
-            "name": f"Emergency Medical Response Unit (Zone {attempt+1})",
-            "phone": "9942119544",
-            "latitude": latitude + (0.01 * mult),
-            "longitude": longitude + (0.01 * mult),
-            "distance_km": round(1.5 * mult, 1)
+            "name": f"General Hospital (Attempt {attempt+1})",
+            "phone": "7708917685",
+            "latitude": latitude + 0.01,
+            "longitude": longitude + 0.01,
+            "distance_km": 1.5
         })
 
     ranked.sort(key=lambda x: x["distance_km"])
@@ -161,7 +158,6 @@ def get_ranked_hospitals(latitude, longitude, attempt=0):
 def get_ranked_police_stations(latitude, longitude, attempt=0):
     ranked = []
     try:
-        # attempt அதிகமாகும்போது ரேடியஸை பெரிதாக்குகிறோம் (15km -> 40km -> 80km)
         radii = [15000, 40000, 80000]
         radius = radii[attempt] if attempt < len(radii) else radii[-1]
         
@@ -185,7 +181,7 @@ def get_ranked_police_stations(latitude, longitude, attempt=0):
                     dist = calculate_distance(latitude, longitude, lat, lon)
                     ranked.append({
                         "name": name,
-                        "phone": "9363928690",  # உங்கள் டெஸ்ட் போலீஸ் எண்
+                        "phone": "9363928690",
                         "latitude": lat,
                         "longitude": lon,
                         "distance_km": dist
@@ -193,15 +189,13 @@ def get_ranked_police_stations(latitude, longitude, attempt=0):
     except Exception as e:
         print(f"Overpass API Police Error: {e}")
 
-    # ஓவர்வாட்ச் ஏபிஐ-ல் டேட்டா கிடைக்கவில்லை என்றால், ஸ்டேட்டிக் பெயருக்குப் பதிலாக டைனமிக் லொகேஷன் உருவாக்கும்
     if not ranked:
-        mult = (attempt + 1) * 1.0
         ranked.append({
-            "name": f"Emergency Police Patrol Unit (Zone {attempt+1})",
+            "name": f"City Police Control Room (Attempt {attempt+1})",
             "phone": "9363928690",
-            "latitude": latitude + (0.012 * mult),
-            "longitude": longitude + (0.012 * mult),
-            "distance_km": round(2.0 * mult, 1)
+            "latitude": latitude + 0.012,
+            "longitude": longitude + 0.012,
+            "distance_km": 2.0
         })
 
     ranked.sort(key=lambda x: x["distance_km"])
@@ -577,8 +571,7 @@ def police_portal(request_id: str, attempt: int = 0):
 @router.get("/hospital-action/{request_id}")
 def handle_hospital_action(request_id: str, attempt: int = 0, action: str = "accept"):
     doc = firestore_get("emergency_requests", request_id)
-    if not doc:
-        return HTMLResponse("<h3>Not Found</h3>", status_code=404)
+    if not doc: return HTMLResponse("Not Found", status_code=404)
     req = parse_doc(doc)
     lat = req.get("latitude", 9.1724)
     lon = req.get("longitude", 77.8682)
@@ -599,11 +592,11 @@ def handle_hospital_action(request_id: str, attempt: int = 0, action: str = "acc
         if contacts_res and "documents" in contacts_res:
             for c in contacts_res["documents"]:
                 p = parse_doc(c).get("phone")
-                if p:
-                    phone_list.append(str(p))
+                if p: phone_list.append(str(p))
 
         hosp_maps = f"https://maps.google.com/?q={accepted_hosp['latitude']},{accepted_hosp['longitude']}"
-        success_msg = f"✅ SAFE UPDATE: Hospital '{accepted_hosp['name']}' has ACCEPTED the emergency and ambulance is dispatched! Hospital Location: {hosp_maps}"
+        # இங்கு உண்மையான மருத்துவமனை பெயர் மற்றும் கூகுள் மேப் லொகேஷன் சேர்த்து அனுப்பப்படுகிறது
+        success_msg = f"✅ SAFE UPDATE: '{accepted_hosp['name']}' has ACCEPTED and ambulance dispatched! Hospital Map: {hosp_maps}"
         send_real_sms("Family (Hospital Accepted)", phone_list, success_msg)
 
         return RedirectResponse(f"/hospital-portal/{request_id}?attempt={attempt}", status_code=303)
@@ -614,8 +607,7 @@ def handle_hospital_action(request_id: str, attempt: int = 0, action: str = "acc
 @router.get("/police-action/{request_id}")
 def handle_police_action(request_id: str, attempt: int = 0, action: str = "accept"):
     doc = firestore_get("emergency_requests", request_id)
-    if not doc:
-        return HTMLResponse("<h3>Not Found</h3>", status_code=404)
+    if not doc: return HTMLResponse("Not Found", status_code=404)
     req = parse_doc(doc)
     lat = req.get("latitude", 9.1724)
     lon = req.get("longitude", 77.8682)
@@ -635,17 +627,12 @@ def handle_police_action(request_id: str, attempt: int = 0, action: str = "accep
         if contacts_res and "documents" in contacts_res:
             for c in contacts_res["documents"]:
                 p = parse_doc(c).get("phone")
-                if p:
-                    phone_list.append(str(p))
+                if p: phone_list.append(str(p))
 
         police_maps = f"https://maps.google.com/?q={accepted_police['latitude']},{accepted_police['longitude']}"
-        family_msg = f"🛡️ SAFE UPDATE: Police Station '{accepted_police['name']}' has ACCEPTED & DEPLOYED patrol unit! Station Location: {police_maps}"
+        # இங்கு உண்மையான போலீஸ் ஸ்டேஷன் பெயர் மற்றும் லொகேஷன் சேர்த்து அனுப்பப்படுகிறது
+        family_msg = f"🛡️ SAFE UPDATE: Police Station '{accepted_police['name']}' has ACCEPTED & DEPLOYED patrol unit! Station Map: {police_maps}"
         send_real_sms("Family (Police Accepted)", phone_list, family_msg)
-
-        police_phone = accepted_police.get("phone")
-        if police_phone:
-            police_msg = f"✅ CASE ACCEPTED CONFIRMATION: Patrol unit deployed for emergency at Lat: {lat}, Lon: {lon}."
-            send_real_sms("Police Station (Confirmation)", [police_phone], police_msg)
 
         return RedirectResponse(f"/police-portal/{request_id}?attempt={attempt}", status_code=303)
     else:
