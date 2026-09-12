@@ -580,11 +580,12 @@ def handle_hospital_action(doc_id: str, attempt: int = 0, action: str = "accept"
         lng = data.get("longitude")
         
         if action.lower() == "accept":
-            firestore_patch("emergency_requests", doc_id, {
+            # ஃபயர்ஸ்டோரில் ஸ்ட்ரிக்ட்டாக ACCEPTED என அப்டேட் செய்கிறோம்
+            success = firestore_patch("emergency_requests", doc_id, {
                 "hospital_status": "ACCEPTED",
                 "status": "ACCEPTED"
             })
-            return {"status": "success", "message": "Hospital Accepted"}
+            return {"status": "success", "message": "Hospital Accepted", "updated": success}
         else:
             next_attempt = attempt + 1
             hospitals = get_ranked_hospitals(lat, lng, attempt=next_attempt)
@@ -612,10 +613,10 @@ def handle_police_action(doc_id: str, attempt: int = 0, action: str = "accept"):
         lng = data.get("longitude")
         
         if action.lower() == "accept":
-            firestore_patch("emergency_requests", doc_id, {
+            success = firestore_patch("emergency_requests", doc_id, {
                 "police_status": "ACCEPTED"
             })
-            return {"status": "success", "message": "Police Accepted"}
+            return {"status": "success", "message": "Police Accepted", "updated": success}
         else:
             next_attempt = attempt + 1
             police_stations = get_ranked_police_stations(lat, lng, attempt=next_attempt)
