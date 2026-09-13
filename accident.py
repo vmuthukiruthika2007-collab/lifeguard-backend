@@ -580,10 +580,21 @@ def handle_hospital_action(doc_id: str, attempt: int = 0, action: str = "accept"
         lng = data.get("longitude")
         
         if action.lower() == "accept":
-            # ஃபயர்ஸ்டோரில் ஸ்ட்ரிக்ட்டாக ACCEPTED என அப்டேட் செய்கிறோம்
+            # ஹாஸ்பிடல் விவரங்களை எடுப்பது
+            hospitals = get_ranked_hospitals(lat, lng, attempt=attempt)
+            current_hosp = hospitals[attempt] if attempt < len(hospitals) else (hospitals[0] if hospitals else {})
+            
+            hosp_name = current_hosp.get("name", "Accepted Hospital")
+            hosp_lat = current_hosp.get("latitude", lat)
+            hosp_lon = current_hosp.get("longitude", lng)
+
+            # ஃபயர்ஸ்டோரில் ஸ்ட்ரிக்ட்டாக ACCEPTED மற்றும் ஹாஸ்பிடல் லொகேஷனை அப்டேட் செய்கிறோம்
             success = firestore_patch("emergency_requests", doc_id, {
                 "hospital_status": "ACCEPTED",
-                "status": "ACCEPTED"
+                "status": "ACCEPTED",
+                "hospital_name": hosp_name,
+                "hospital_latitude": hosp_lat,
+                "hospital_longitude": hosp_lon
             })
             return {"status": "success", "message": "Hospital Accepted", "updated": success}
         else:
@@ -600,7 +611,7 @@ def handle_hospital_action(doc_id: str, attempt: int = 0, action: str = "accept"
             
     except Exception as e:
         return {"detail": str(e)}
-
+    
 @router.get("/police-action/{doc_id}")
 def handle_police_action(doc_id: str, attempt: int = 0, action: str = "accept"):
     try:
