@@ -309,20 +309,29 @@ def reset_password(data: ResetPasswordRequest):
         if not found_doc_id:
             return {"success": False, "message": "User not found"}
 
+        # புதிய பாஸ்வேர்டை Hash செய்து நேரடியாக Firestore-க்கு patch செய்வது
         new_hashed = pwd_context.hash(data.new_password)
-        success = firestore_set("users", str(found_doc_id), {"password": new_hashed})
-
-        if success:
+        
+        url = f"{FIRESTORE_BASE_URL}/users/{found_doc_id}"
+        payload = {
+            "fields": {
+                "password": {"stringValue": new_hashed}
+            }
+        }
+        
+        res = requests.patch(url, json=payload, timeout=5)
+        
+        if res.status_code == 200:
             del otp_storage[email_key]
             return {"success": True, "message": "Password reset successfully!"}
         
+        print("Firestore Reset Error Response:", res.text)
         return {"success": False, "message": "Failed to update password in database"}
 
     except Exception as e:
         print("RESET PASSWORD ERROR:", e)
         return {"success": False, "message": str(e)}
-
-
+    
 # ================= GET PROFILE =================
 
 @router.get("/profile/{user_id}")
