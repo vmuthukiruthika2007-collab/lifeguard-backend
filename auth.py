@@ -262,8 +262,8 @@ def forgot_password(data: ForgotPasswordRequest):
         otp_storage[data.email.strip().lower()] = generated_otp
 
         # ஜிமெயில் SMTP மூலம் ஈமெயில் அனுப்புவது (உங்கள் ஆஃபிஷியல் ஈமெயில் விவரங்களை இங்கே கொடுக்கவும்)
-        sender_email = "your_official_email@gmail.com"
-        sender_password = "your_email_app_password"  # Google App Password
+        sender_email = "supportlifeguard@gmail.com"
+        sender_password = "fmwj whqq whbg skqg"  # 16-digit App Password  # Google App Password
         
         try:
             msg = MIMEMultipart()
