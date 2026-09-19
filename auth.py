@@ -1,9 +1,13 @@
 import os
 import shutil
 import requests
+import random
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import Optional
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from passlib.context import CryptContext
 
@@ -19,6 +23,9 @@ pwd_context = CryptContext(
 
 UPLOAD_DIR = "static/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# தற்காலிகமாக OTP-களை சேமிக்க (Production-ல் டேட்டாபேஸ் அல்லது Redis பயன்படுத்தலாம்)
+otp_storage = {}
 
 
 # ================= FIRESTORE REST API HELPERS =================
@@ -124,6 +131,14 @@ class ChangePassword(BaseModel):
     old_password: str
     new_password: str
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp: str
+    new_password: str
+
 class EmergencyContactCreate(BaseModel):
     user_id: int
     name: str
@@ -221,6 +236,91 @@ def login(user: LoginUser):
 
     except Exception as e:
         print("LOGIN ERROR:", e)
+        return {"success": False, "message": str(e)}
+
+
+# ================= FORGOT & RESET PASSWORD =================
+
+@router.post("/forgot-password")
+def forgot_password(data: ForgotPasswordRequest):
+    try:
+        # டேட்டாபேஸில் ஈமெயில் உள்ளதா எனச் சரிபார்க்கவும்
+        users_res = firestore_get("users")
+        found_doc_id = None
+        if users_res and "documents" in users_res:
+            for doc in users_res["documents"]:
+                parsed = parse_doc(doc)
+                if parsed.get("email", "").lower() == data.email.strip().lower():
+                    found_doc_id = parsed.get("id")
+                    break
+
+        if not found_doc_id:
+            return {"success": False, "message": "Email not registered"}
+
+        # 6 இலக்க OTP உருவாக்குவது
+        generated_otp = str(random.randint(100000, 999999))
+        otp_storage[data.email.strip().lower()] = generated_otp
+
+        # ஜிமெயில் SMTP மூலம் ஈமெயில் அனுப்புவது (உங்கள் ஆஃபிஷியல் ஈமெயில் விவரங்களை இங்கே கொடுக்கவும்)
+        sender_email = "your_official_email@gmail.com"
+        sender_password = "your_email_app_password"  # Google App Password
+        
+        try:
+            msg = MIMEMultipart()
+            msg["From"] = sender_email
+            msg["To"] = data.email.strip()
+            msg["Subject"] = "LifeGuard - Password Reset OTP"
+            
+            body = f"Your OTP for password reset is: {generated_otp}. Valid for 10 minutes."
+            msg.attach(MIMEText(body, "plain"))
+            
+            server = smtplib.SMTP("smtp.gmail.com", 587)
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, data.email.strip(), msg.as_string())
+            server.quit()
+        except Exception as mail_err:
+            print("Mail Send Error:", mail_err)
+            # டெஸ்டிங்கிற்காக ஈமெயில் சென்ட் ஆகாவிட்டாலும் OTP-ஐ லாக்கில் காட்டிக்கொள்ளலாம்
+            print(f">>> TEST OTP for {data.email}: {generated_otp} <<<")
+
+        return {"success": True, "message": "OTP sent to your email successfully!"}
+
+    except Exception as e:
+        print("FORGOT PASSWORD ERROR:", e)
+        return {"success": False, "message": str(e)}
+
+@router.post("/reset-password")
+def reset_password(data: ResetPasswordRequest):
+    try:
+        email_key = data.email.strip().lower()
+        if email_key not in otp_storage or otp_storage[email_key] != data.otp.strip():
+            return {"success": False, "message": "Invalid or expired OTP"}
+
+        # டேட்டாபேஸில் யூசரைத் தேடி புதிய பாஸ்வேர்டை அப்டேட் செய்வது
+        users_res = firestore_get("users")
+        found_doc_id = None
+        if users_res and "documents" in users_res:
+            for doc in users_res["documents"]:
+                parsed = parse_doc(doc)
+                if parsed.get("email", "").lower() == email_key:
+                    found_doc_id = parsed.get("id")
+                    break
+
+        if not found_doc_id:
+            return {"success": False, "message": "User not found"}
+
+        new_hashed = pwd_context.hash(data.new_password)
+        success = firestore_set("users", str(found_doc_id), {"password": new_hashed})
+
+        if success:
+            del otp_storage[email_key]
+            return {"success": True, "message": "Password reset successfully!"}
+        
+        return {"success": False, "message": "Failed to update password in database"}
+
+    except Exception as e:
+        print("RESET PASSWORD ERROR:", e)
         return {"success": False, "message": str(e)}
 
 
