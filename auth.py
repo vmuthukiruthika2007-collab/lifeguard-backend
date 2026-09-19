@@ -2,9 +2,6 @@ import os
 import shutil
 import requests
 import random
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from typing import Optional
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, HTTPException
@@ -261,27 +258,29 @@ def forgot_password(data: ForgotPasswordRequest):
         generated_otp = str(random.randint(100000, 999999))
         otp_storage[data.email.strip().lower()] = generated_otp
 
-        # ஜிமெயில் SMTP மூலம் ஈமெயில் அனுப்புவது (உங்கள் ஆஃபிஷியல் ஈமெயில் விவரங்களை இங்கே கொடுக்கவும்)
-        sender_email = "supportlifeguard@gmail.com"
-        sender_password = "fmwj whqq whbg skqg"  # 16-digit App Password  # Google App Password
-        
+        # Brevo HTTP API மூலம் ஈமெயில் அனுப்புவது (Render-kku perfect-ah work aagum)
+        brevo_url = "https://api.brevo.com/v3/smtp/email"
+        api_key = os.getenv("BREVO_API_KEY", "")
+
+        payload = {
+            "sender": {"name": "LifeGuard Support", "email": "supportlifeguard@gmail.com"},
+            "to": [{"email": data.email.strip()}],
+            "subject": "LifeGuard - Password Reset OTP",
+            "htmlContent": f"<p>Your OTP for password reset is: <b>{generated_otp}</b>. Valid for 10 minutes.</p>"
+        }
+
+        headers = {
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json"
+        }
+
         try:
-            msg = MIMEMultipart()
-            msg["From"] = sender_email
-            msg["To"] = data.email.strip()
-            msg["Subject"] = "LifeGuard - Password Reset OTP"
-            
-            body = f"Your OTP for password reset is: {generated_otp}. Valid for 10 minutes."
-            msg.attach(MIMEText(body, "plain"))
-            
-            server = smtplib.SMTP("smtp.gmail.com", 587)
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, data.email.strip(), msg.as_string())
-            server.quit()
+            response = requests.post(brevo_url, json=payload, headers=headers, timeout=10)
+            if response.status_code != 201 and response.status_code != 200:
+                print("Brevo API Error:", response.text)
         except Exception as mail_err:
             print("Mail Send Error:", mail_err)
-            # டெஸ்டிங்கிற்காக ஈமெயில் சென்ட் ஆகாவிட்டாலும் OTP-ஐ லாக்கில் காட்டிக்கொள்ளலாம்
             print(f">>> TEST OTP for {data.email}: {generated_otp} <<<")
 
         return {"success": True, "message": "OTP sent to your email successfully!"}
