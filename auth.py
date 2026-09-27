@@ -21,9 +21,6 @@ pwd_context = CryptContext(
 UPLOAD_DIR = "static/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# தற்காலிகமாக OTP-களை சேமிக்க (Production-ல் டேட்டாபேஸ் அல்லது Redis பயன்படுத்தலாம்)
-otp_storage = {}
-
 
 # ================= FIRESTORE REST API HELPERS =================
 
@@ -37,11 +34,11 @@ def firestore_get(collection_path: str, doc_id: str = ""):
         print(f"Firestore GET Error ({collection_path}): {e}")
     return None
 
-def firestore_set(collection_path: str, doc_id: str, fields: dict):
+def firestore_set(collection_path: str, doc_id: str, fields: dict, use_mask: bool = True):
     url = f"{FIRESTORE_BASE_URL}/{collection_path}/{doc_id}"
     
-    # updateMask சேர்ப்பதன் மூலம் மற்ற fields (email, password போன்றவை) அழியாமல் safe-ஆக update ஆகும்
-    if fields:
+    # use_mask True-aga irunthal mattum updateMask apply agum (Password reset-kku False-a irukkum)
+    if use_mask and fields:
         mask_params = "&".join([f"updateMask.fieldPaths={k}" for k in fields.keys()])
         url += f"?{mask_params}"
 
@@ -192,7 +189,7 @@ def register(user: RegisterUser):
             "created_at": datetime.utcnow().isoformat(),
         }
 
-        success = firestore_set("users", str(user_id), user_data)
+        success = firestore_set("users", str(user_id), user_data, use_mask=False)
         if success:
             return {"success": True, "message": "Registration Successful", "user_id": user_id}
         return {"success": False, "message": "Failed to create user record in Firestore"}
@@ -259,13 +256,11 @@ def forgot_password(data: ForgotPasswordRequest):
         if not found_doc_id:
             return {"success": False, "message": "Email not registered"}
 
-        # 6 இலக்க OTP உருவாக்குவது
         generated_otp = str(random.randint(100000, 999999))
         
-        # OTP-ஐ மெமரிக்கு பதிலாக நேராக Firestore டேட்டாபேஸில் சேமிப்பது (Render restart ஆனாலும் அழியாது)
-        firestore_set("users", str(found_doc_id), {"reset_otp": generated_otp})
+        # OTP சேமிக்க மட்டும் use_mask=False கொடுத்து பாதுகாப்பாக சேமிக்கிறோம்
+        firestore_set("users", str(found_doc_id), {"reset_otp": generated_otp}, use_mask=False)
 
-        # Brevo HTTP API மூலம் ஈமெயில் அனுப்புவது
         brevo_url = "https://api.brevo.com/v3/smtp/email"
         api_key = os.getenv("BREVO_API_KEY", "")
 
@@ -319,12 +314,12 @@ def reset_password(data: ResetPasswordRequest):
         if str(stored_otp).strip() != data.otp.strip():
             return {"success": False, "message": "Invalid or expired OTP"}
 
-        # புதிய பாஸ்வேர்டை Hash செய்து, password மற்றும் reset_otp இரண்டையும் சேர்த்து update செய்வது
+        # புதிய பாஸ்வேர்டை Hash செய்து, password மற்றும் reset_otp இரண்டையும் சேர்த்து update செய்வது (use_mask=False)
         new_hashed = pwd_context.hash(data.new_password)
         success = firestore_set("users", str(found_doc_id), {
             "password": new_hashed,
             "reset_otp": "" 
-        })
+        }, use_mask=False)
         
         if success:
             return {"success": True, "message": "Password reset successfully!"}
@@ -334,6 +329,7 @@ def reset_password(data: ResetPasswordRequest):
     except Exception as e:
         print("RESET PASSWORD ERROR:", e)
         return {"success": False, "message": str(e)}
+
 
 # ================= GET PROFILE =================
 
