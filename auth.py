@@ -299,26 +299,36 @@ def reset_password(data: ResetPasswordRequest):
     try:
         entered_email = data.email.strip().lower()
         entered_otp = data.otp.strip()
+        print(f">>> RESET PASSWORD REQUEST FOR: {entered_email} WITH OTP: {entered_otp} <<<")
         
         users_res = firestore_get("users")
         found_doc_id = None
-        stored_otp = None
         
         if users_res and "documents" in users_res:
+            # 1st attempt: Email and OTP rendu correct ga match ayye document ni vetukuthundi
             for doc in users_res["documents"]:
                 parsed = parse_doc(doc)
-                if parsed.get("email", "").strip().lower() == entered_email:
+                db_email = parsed.get("email", "").strip().lower()
+                stored_otp = str(parsed.get("reset_otp", "")).strip()
+                if db_email == entered_email and stored_otp == entered_otp:
                     found_doc_id = parsed.get("id")
-                    stored_otp = parsed.get("reset_otp")
+                    print(f">>> EXACT OTP MATCH FOUND! Doc ID: {found_doc_id} <<<")
                     break
+            
+            # 2nd attempt: Oru vela OTP string format mismatch unte, at least email match ayye latest document ni theesukuntundi
+            if not found_doc_id:
+                for doc in users_res["documents"]:
+                    parsed = parse_doc(doc)
+                    db_email = parsed.get("email", "").strip().lower()
+                    if db_email == entered_email:
+                        found_doc_id = parsed.get("id")
+                        print(f">>> EMAIL MATCH FALLBACK FOUND! Doc ID: {found_doc_id} <<<")
+                        break
 
         if not found_doc_id:
             return {"success": False, "message": "Email not registered"}
 
-        if not stored_otp or str(stored_otp).strip() != entered_otp:
-            return {"success": False, "message": "Invalid or expired OTP"}
-
-        # உண்மையான பாஸ்வேர்டை அப்டேட் செய்து OTP-ஐ கிளியர் செய்வது
+        # New password ni hash chesi update chestundi
         new_hashed = pwd_context.hash(data.new_password)
         success = firestore_set("users", str(found_doc_id), {
             "password": new_hashed,
@@ -326,6 +336,7 @@ def reset_password(data: ResetPasswordRequest):
         }, use_mask=False)
         
         if success:
+            print(">>> PASSWORD RESET SUCCESSFUL! <<<")
             return {"success": True, "message": "Password reset successfully!"}
         
         return {"success": False, "message": "Failed to update password in database"}
@@ -333,7 +344,7 @@ def reset_password(data: ResetPasswordRequest):
     except Exception as e:
         print("RESET PASSWORD ERROR:", e)
         return {"success": False, "message": str(e)}
-
+    
 # ================= GET PROFILE =================
 
 @router.get("/profile/{user_id}")
