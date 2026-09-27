@@ -301,18 +301,16 @@ def reset_password(data: ResetPasswordRequest):
     try:
         email_key = data.email.strip().lower()
         
-        # டேட்டாபேஸில் இருந்து யூசரையும் அவங்க சேமித்த OTP-யையும் எடுப்பது
+        # டேட்டாபேஸில் இருந்து யூசரைத் தேடுவது
         users_res = firestore_get("users")
         found_doc_id = None
         stored_otp = None
-        found_user_id = None
         
         if users_res and "documents" in users_res:
             for doc in users_res["documents"]:
                 parsed = parse_doc(doc)
                 if parsed.get("email", "").lower() == email_key:
-                    found_doc_id = parsed.get("id")
-                    found_user_id = str(parsed.get("user_id", parsed.get("id")))
+                    found_doc_id = parsed.get("id") # இதுதான் Firestore-ன் சரியான Document ID (உதாரணமாக user_id அல்லது doc name)
                     stored_otp = parsed.get("reset_otp")
                     break
 
@@ -322,11 +320,11 @@ def reset_password(data: ResetPasswordRequest):
         if stored_otp != data.otp.strip():
             return {"success": False, "message": "Invalid or expired OTP"}
 
-        # புதிய பாஸ்வேர்டை Hash செய்து Firestore-ல் உள்ள டாக்குமெண்டில் update செய்வதுடன், OTP-ஐ கிளியர் செய்வது
+        # புதிய பாஸ்வேர்டை Hash செய்து சரியான Document ID-ஐ கொண்டு update செய்வது
         new_hashed = pwd_context.hash(data.new_password)
-        success = firestore_set("users", found_user_id, {
+        success = firestore_set("users", str(found_doc_id), {
             "password": new_hashed,
-            "reset_otp": "" 
+            "reset_otp": "" # பயன்டுத்திய OTP-ஐ கிளியர் செய்துவிடுவது
         })
         
         if success:
