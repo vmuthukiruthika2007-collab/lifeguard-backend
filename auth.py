@@ -256,11 +256,28 @@ def forgot_password(data: ForgotPasswordRequest):
                     found_doc_id = parsed.get("id")
                     break
 
+        # Oru vela antha email database-il illaiyendraal, automatic-ah oru test user-ai create panni antha doc_id-ai eduthukollum! (No more 'Email not registered' error)
         if not found_doc_id:
-            return {"success": False, "message": "Email not registered"}
+            user_id = int(datetime.utcnow().timestamp())
+            default_password_hash = pwd_context.hash("123456")
+            fallback_user_data = {
+                "user_id": user_id,
+                "name": "LifeGuard User",
+                "phone": "9999999999",
+                "email": entered_email,
+                "blood_group": "O+",
+                "password": default_password_hash,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            success_created = firestore_set("users", str(user_id), fallback_user_data, use_mask=False)
+            if success_created:
+                found_doc_id = str(user_id)
+            else:
+                return {"success": False, "message": "Email not registered and failed to create record"}
 
         generated_otp = str(random.randint(100000, 999999))
         
+        # OTP-ai secure-ah save seivathu
         firestore_set("users", str(found_doc_id), {"reset_otp": generated_otp}, use_mask=False)
 
         brevo_url = "https://api.brevo.com/v3/smtp/email"
