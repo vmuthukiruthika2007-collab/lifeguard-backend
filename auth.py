@@ -37,7 +37,6 @@ def firestore_get(collection_path: str, doc_id: str = ""):
 def firestore_set(collection_path: str, doc_id: str, fields: dict, use_mask: bool = True):
     url = f"{FIRESTORE_BASE_URL}/{collection_path}/{doc_id}"
     
-    # use_mask True-aga irunthal mattum updateMask apply agum (Password reset-kku False-a irukkum)
     if use_mask and fields:
         mask_params = "&".join([f"updateMask.fieldPaths={k}" for k in fields.keys()])
         url += f"?{mask_params}"
@@ -169,11 +168,12 @@ class UserSettings(BaseModel):
 @router.post("/register")
 def register(user: RegisterUser):
     try:
+        entered_email = user.email.strip().lower()
         users_res = firestore_get("users")
         if users_res and "documents" in users_res:
             for doc in users_res["documents"]:
                 data = parse_doc(doc)
-                if data.get("email", "").lower() == user.email.strip().lower():
+                if data.get("email", "").strip().lower() == entered_email:
                     return {"success": False, "message": "Email already registered"}
 
         user_id = int(datetime.utcnow().timestamp())
@@ -183,7 +183,7 @@ def register(user: RegisterUser):
             "user_id": user_id,
             "name": user.name.strip(),
             "phone": user.phone.strip(),
-            "email": user.email.strip(),
+            "email": entered_email,
             "blood_group": user.blood_group.strip(),
             "password": hashed_password,
             "created_at": datetime.utcnow().isoformat(),
@@ -204,6 +204,7 @@ def register(user: RegisterUser):
 @router.post("/login")
 def login(user: LoginUser):
     try:
+        entered_email = user.email.strip().lower()
         users_res = firestore_get("users")
         if not users_res or "documents" not in users_res:
             return {"success": False, "message": "Email not found"}
@@ -211,7 +212,7 @@ def login(user: LoginUser):
         found_user = None
         for doc in users_res["documents"]:
             data = parse_doc(doc)
-            if data.get("email", "").lower() == user.email.strip().lower():
+            if data.get("email", "").strip().lower() == entered_email:
                 found_user = data
                 break
 
@@ -244,12 +245,14 @@ def login(user: LoginUser):
 @router.post("/forgot-password")
 def forgot_password(data: ForgotPasswordRequest):
     try:
+        entered_email = data.email.strip().lower()
         users_res = firestore_get("users")
         found_doc_id = None
+        
         if users_res and "documents" in users_res:
             for doc in users_res["documents"]:
                 parsed = parse_doc(doc)
-                if parsed.get("email", "").lower() == data.email.strip().lower():
+                if parsed.get("email", "").strip().lower() == entered_email:
                     found_doc_id = parsed.get("id")
                     break
 
@@ -258,7 +261,6 @@ def forgot_password(data: ForgotPasswordRequest):
 
         generated_otp = str(random.randint(100000, 999999))
         
-        # OTP சேமிக்க மட்டும் use_mask=False கொடுத்து பாதுகாப்பாக சேமிக்கிறோம்
         firestore_set("users", str(found_doc_id), {"reset_otp": generated_otp}, use_mask=False)
 
         brevo_url = "https://api.brevo.com/v3/smtp/email"
@@ -294,9 +296,7 @@ def forgot_password(data: ForgotPasswordRequest):
 @router.post("/reset-password")
 def reset_password(data: ResetPasswordRequest):
     try:
-        email_key = data.email.strip().lower()
-        print(f">>> RESET PASSWORD ATTEMPT FOR: {email_key} WITH OTP: {data.otp} <<<")
-        
+        entered_email = data.email.strip().lower()
         users_res = firestore_get("users")
         found_doc_id = None
         stored_otp = None
@@ -304,22 +304,17 @@ def reset_password(data: ResetPasswordRequest):
         if users_res and "documents" in users_res:
             for doc in users_res["documents"]:
                 parsed = parse_doc(doc)
-                db_email = parsed.get("email", "").strip().lower()
-                if db_email == email_key:
+                if parsed.get("email", "").strip().lower() == entered_email:
                     found_doc_id = parsed.get("id")
                     stored_otp = parsed.get("reset_otp")
-                    print(f">>> MATCH FOUND! Doc ID: {found_doc_id}, Stored OTP: {stored_otp} <<<")
                     break
 
         if not found_doc_id or not stored_otp:
-            print(">>> ERROR: User document not found or OTP is missing in DB <<<")
             return {"success": False, "message": "Invalid request or OTP expired"}
 
         if str(stored_otp).strip() != data.otp.strip():
-            print(f">>> ERROR: OTP mismatch! Stored: '{stored_otp}' vs Entered: '{data.otp}' <<<")
             return {"success": False, "message": "Invalid or expired OTP"}
 
-        # புதிய பாஸ்வேர்டை Hash செய்து update செய்வது
         new_hashed = pwd_context.hash(data.new_password)
         success = firestore_set("users", str(found_doc_id), {
             "password": new_hashed,
@@ -327,17 +322,15 @@ def reset_password(data: ResetPasswordRequest):
         }, use_mask=False)
         
         if success:
-            print(">>> PASSWORD RESET SUCCESSFUL! <<<")
             return {"success": True, "message": "Password reset successfully!"}
         
-        print(">>> ERROR: Firestore SET failed during password reset <<<")
         return {"success": False, "message": "Failed to update password in database"}
 
     except Exception as e:
         print("RESET PASSWORD ERROR:", e)
         return {"success": False, "message": str(e)}
 
-    
+
 # ================= GET PROFILE =================
 
 @router.get("/profile/{user_id}")
