@@ -37,29 +37,26 @@ def firestore_get(collection_path: str, doc_id: str = ""):
 def firestore_set(collection_path: str, doc_id: str, fields: dict, use_mask: bool = True):
     url = f"{FIRESTORE_BASE_URL}/{collection_path}/{doc_id}"
     
-    # Munbue irukkira document data-ai fetch seithu safety-ah merge seivathu (Data azhiyathu)
+    # 1. First existing document-ai fetch seithu data-ai safe-a eduthukrom
     existing_doc = firestore_get(collection_path, doc_id)
     combined_fields = {}
     
     if existing_doc and "fields" in existing_doc:
-        for k, v in existing_doc["fields"].items():
-            combined_fields[k] = v
+        combined_fields = existing_doc["fields"]
 
-    # Puthu fields-ai athutan add seivathu
-    formatted_new = {}
+    # 2. Puthu fields-ai existing data-kku odane add/update seivathu (Nothing will be deleted)
     for k, v in fields.items():
         if v is None:
             continue
         elif isinstance(v, bool):
-            formatted_new[k] = {"booleanValue": v}
+            combined_fields[k] = {"booleanValue": v}
         elif isinstance(v, (int, float)):
-            formatted_new[k] = {"integerValue": str(int(v))} if isinstance(v, int) else {"doubleValue": float(v)}
+            combined_fields[k] = {"integerValue": str(int(v))} if isinstance(v, int) else {"doubleValue": float(v)}
         else:
-            formatted_new[k] = {"stringValue": str(v)}
-            
-    combined_fields.update(formatted_new)
+            combined_fields[k] = {"stringValue": str(v)}
 
     try:
+        # Patch request with full merged fields
         res = requests.patch(url, json={"fields": combined_fields}, timeout=5)
         return res.status_code == 200
     except Exception as e:
