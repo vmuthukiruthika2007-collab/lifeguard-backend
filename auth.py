@@ -39,6 +39,12 @@ def firestore_get(collection_path: str, doc_id: str = ""):
 
 def firestore_set(collection_path: str, doc_id: str, fields: dict):
     url = f"{FIRESTORE_BASE_URL}/{collection_path}/{doc_id}"
+    
+    # updateMask சேர்ப்பதன் மூலம் மற்ற fields (email, password போன்றவை) அழியாமல் safe-ஆக update ஆகும்
+    if fields:
+        mask_params = "&".join([f"updateMask.fieldPaths={k}" for k in fields.keys()])
+        url += f"?{mask_params}"
+
     formatted_fields = {}
     for k, v in fields.items():
         if v is None:
@@ -316,11 +322,11 @@ def reset_password(data: ResetPasswordRequest):
         if stored_otp != data.otp.strip():
             return {"success": False, "message": "Invalid or expired OTP"}
 
-        # புதிய பாஸ்வேர்டை Hash செய்து Firestore-ல் உள்ள டாக்குமெண்டில் update செய்வது
+        # புதிய பாஸ்வேர்டை Hash செய்து Firestore-ல் உள்ள டாக்குமெண்டில் update செய்வதுடன், OTP-ஐ கிளியர் செய்வது
         new_hashed = pwd_context.hash(data.new_password)
         success = firestore_set("users", found_user_id, {
             "password": new_hashed,
-            "reset_otp": "" # பயன்டுத்திய OTP-ஐ கிளியர் செய்துவிடுவது
+            "reset_otp": "" 
         })
         
         if success:
@@ -331,7 +337,6 @@ def reset_password(data: ResetPasswordRequest):
     except Exception as e:
         print("RESET PASSWORD ERROR:", e)
         return {"success": False, "message": str(e)}
-
 
 # ================= GET PROFILE =================
 
