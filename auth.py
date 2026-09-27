@@ -37,28 +37,35 @@ def firestore_get(collection_path: str, doc_id: str = ""):
 def firestore_set(collection_path: str, doc_id: str, fields: dict, use_mask: bool = True):
     url = f"{FIRESTORE_BASE_URL}/{collection_path}/{doc_id}"
     
-    if use_mask and fields:
-        mask_params = "&".join([f"updateMask.fieldPaths={k}" for k in fields.keys()])
-        url += f"?{mask_params}"
+    # Munbue irukkira document data-ai fetch seithu safety-ah merge seivathu (Data azhiyathu)
+    existing_doc = firestore_get(collection_path, doc_id)
+    combined_fields = {}
+    
+    if existing_doc and "fields" in existing_doc:
+        for k, v in existing_doc["fields"].items():
+            combined_fields[k] = v
 
-    formatted_fields = {}
+    # Puthu fields-ai athutan add seivathu
+    formatted_new = {}
     for k, v in fields.items():
         if v is None:
             continue
         elif isinstance(v, bool):
-            formatted_fields[k] = {"booleanValue": v}
+            formatted_new[k] = {"booleanValue": v}
         elif isinstance(v, (int, float)):
-            formatted_fields[k] = {"integerValue": str(int(v))} if isinstance(v, int) else {"doubleValue": float(v)}
+            formatted_new[k] = {"integerValue": str(int(v))} if isinstance(v, int) else {"doubleValue": float(v)}
         else:
-            formatted_fields[k] = {"stringValue": str(v)}
+            formatted_new[k] = {"stringValue": str(v)}
+            
+    combined_fields.update(formatted_new)
 
     try:
-        res = requests.patch(url, json={"fields": formatted_fields}, timeout=5)
+        res = requests.patch(url, json={"fields": combined_fields}, timeout=5)
         return res.status_code == 200
     except Exception as e:
         print(f"Firestore SET Error ({collection_path}): {e}")
         return False
-
+    
 def firestore_post(collection_path: str, fields: dict):
     url = f"{FIRESTORE_BASE_URL}/{collection_path}"
     formatted_fields = {}
