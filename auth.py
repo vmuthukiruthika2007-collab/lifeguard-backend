@@ -241,7 +241,6 @@ def login(user: LoginUser):
 @router.post("/forgot-password")
 def forgot_password(data: ForgotPasswordRequest):
     try:
-        # டேட்டாபேஸில் ஈமெயில் உள்ளதா எனச் சரிபார்க்கவும்
         users_res = firestore_get("users")
         found_doc_id = None
         if users_res and "documents" in users_res:
@@ -256,9 +255,11 @@ def forgot_password(data: ForgotPasswordRequest):
 
         # 6 இலக்க OTP உருவாக்குவது
         generated_otp = str(random.randint(100000, 999999))
-        otp_storage[data.email.strip().lower()] = generated_otp
+        
+        # OTP-ஐ மெமரிக்கு பதிலாக நேராக Firestore டேட்டாபேஸில் சேமிப்பது (Render restart ஆனாலும் அழியாது)
+        firestore_set("users", str(found_doc_id), {"reset_otp": generated_otp})
 
-        # Brevo HTTP API மூலம் ஈமெயில் அனுப்புவது (Render-kku perfect-ah work aagum)
+        # Brevo HTTP API மூலம் ஈமெயில் அனுப்புவது
         brevo_url = "https://api.brevo.com/v3/smtp/email"
         api_key = os.getenv("BREVO_API_KEY", "")
 
@@ -293,29 +294,36 @@ def forgot_password(data: ForgotPasswordRequest):
 def reset_password(data: ResetPasswordRequest):
     try:
         email_key = data.email.strip().lower()
-        if email_key not in otp_storage or otp_storage[email_key] != data.otp.strip():
-            return {"success": False, "message": "Invalid or expired OTP"}
-
-        # டேட்டாபேஸில் ஈமெயிலை வைத்து சரியான யூசரைத் தேடுவது
+        
+        # டேட்டாபேஸில் இருந்து யூசரையும் அவங்க சேமித்த OTP-யையும் எடுப்பது
         users_res = firestore_get("users")
+        found_doc_id = None
+        stored_otp = None
         found_user_id = None
+        
         if users_res and "documents" in users_res:
             for doc in users_res["documents"]:
                 parsed = parse_doc(doc)
                 if parsed.get("email", "").lower() == email_key:
-                    # user_id-ஐ சரியான document ID-ஆக எடுத்துக் கொள்ளுதல்
+                    found_doc_id = parsed.get("id")
                     found_user_id = str(parsed.get("user_id", parsed.get("id")))
+                    stored_otp = parsed.get("reset_otp")
                     break
 
-        if not found_user_id:
-            return {"success": False, "message": "User not found"}
+        if not found_doc_id or not stored_otp:
+            return {"success": False, "message": "Invalid request or OTP expired"}
 
-        # புதிய பாஸ்வேர்டை Hash செய்து Firestore-ல் உள்ள சரியான டாக்குமெண்டில் update செய்வது
+        if stored_otp != data.otp.strip():
+            return {"success": False, "message": "Invalid or expired OTP"}
+
+        # புதிய பாஸ்வேர்டை Hash செய்து Firestore-ல் உள்ள டாக்குமெண்டில் update செய்வது
         new_hashed = pwd_context.hash(data.new_password)
-        success = firestore_set("users", found_user_id, {"password": new_hashed})
+        success = firestore_set("users", found_user_id, {
+            "password": new_hashed,
+            "reset_otp": "" # பயன்டுத்திய OTP-ஐ கிளியர் செய்துவிடுவது
+        })
         
         if success:
-            del otp_storage[email_key]
             return {"success": True, "message": "Password reset successfully!"}
         
         return {"success": False, "message": "Failed to update password in database"}
@@ -323,7 +331,8 @@ def reset_password(data: ResetPasswordRequest):
     except Exception as e:
         print("RESET PASSWORD ERROR:", e)
         return {"success": False, "message": str(e)}
-    
+
+
 # ================= GET PROFILE =================
 
 @router.get("/profile/{user_id}")
