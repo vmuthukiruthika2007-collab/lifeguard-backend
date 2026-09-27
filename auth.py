@@ -295,6 +295,7 @@ def forgot_password(data: ForgotPasswordRequest):
 def reset_password(data: ResetPasswordRequest):
     try:
         email_key = data.email.strip().lower()
+        print(f">>> RESET PASSWORD ATTEMPT FOR: {email_key} WITH OTP: {data.otp} <<<")
         
         users_res = firestore_get("users")
         found_doc_id = None
@@ -303,18 +304,22 @@ def reset_password(data: ResetPasswordRequest):
         if users_res and "documents" in users_res:
             for doc in users_res["documents"]:
                 parsed = parse_doc(doc)
-                if parsed.get("email", "").lower() == email_key:
+                db_email = parsed.get("email", "").strip().lower()
+                if db_email == email_key:
                     found_doc_id = parsed.get("id")
                     stored_otp = parsed.get("reset_otp")
+                    print(f">>> MATCH FOUND! Doc ID: {found_doc_id}, Stored OTP: {stored_otp} <<<")
                     break
 
         if not found_doc_id or not stored_otp:
+            print(">>> ERROR: User document not found or OTP is missing in DB <<<")
             return {"success": False, "message": "Invalid request or OTP expired"}
 
         if str(stored_otp).strip() != data.otp.strip():
+            print(f">>> ERROR: OTP mismatch! Stored: '{stored_otp}' vs Entered: '{data.otp}' <<<")
             return {"success": False, "message": "Invalid or expired OTP"}
 
-        # புதிய பாஸ்வேர்டை Hash செய்து, password மற்றும் reset_otp இரண்டையும் சேர்த்து update செய்வது (use_mask=False)
+        # புதிய பாஸ்வேர்டை Hash செய்து update செய்வது
         new_hashed = pwd_context.hash(data.new_password)
         success = firestore_set("users", str(found_doc_id), {
             "password": new_hashed,
@@ -322,15 +327,17 @@ def reset_password(data: ResetPasswordRequest):
         }, use_mask=False)
         
         if success:
+            print(">>> PASSWORD RESET SUCCESSFUL! <<<")
             return {"success": True, "message": "Password reset successfully!"}
         
+        print(">>> ERROR: Firestore SET failed during password reset <<<")
         return {"success": False, "message": "Failed to update password in database"}
 
     except Exception as e:
         print("RESET PASSWORD ERROR:", e)
         return {"success": False, "message": str(e)}
 
-
+    
 # ================= GET PROFILE =================
 
 @router.get("/profile/{user_id}")
