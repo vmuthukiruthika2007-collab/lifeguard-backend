@@ -296,36 +296,28 @@ def reset_password(data: ResetPasswordRequest):
         if email_key not in otp_storage or otp_storage[email_key] != data.otp.strip():
             return {"success": False, "message": "Invalid or expired OTP"}
 
-        # டேட்டாபேஸில் யூசரைத் தேடி புதிய பாஸ்வேர்டை அப்டேட் செய்வது
+        # டேட்டாபேஸில் ஈமெயிலை வைத்து சரியான யூசரைத் தேடுவது
         users_res = firestore_get("users")
-        found_doc_id = None
+        found_user_id = None
         if users_res and "documents" in users_res:
             for doc in users_res["documents"]:
                 parsed = parse_doc(doc)
                 if parsed.get("email", "").lower() == email_key:
-                    found_doc_id = parsed.get("id")
+                    # user_id-ஐ சரியான document ID-ஆக எடுத்துக் கொள்ளுதல்
+                    found_user_id = str(parsed.get("user_id", parsed.get("id")))
                     break
 
-        if not found_doc_id:
+        if not found_user_id:
             return {"success": False, "message": "User not found"}
 
-        # புதிய பாஸ்வேர்டை Hash செய்து நேரடியாக Firestore-க்கு patch செய்வது
+        # புதிய பாஸ்வேர்டை Hash செய்து Firestore-ல் உள்ள சரியான டாக்குமெண்டில் update செய்வது
         new_hashed = pwd_context.hash(data.new_password)
+        success = firestore_set("users", found_user_id, {"password": new_hashed})
         
-        url = f"{FIRESTORE_BASE_URL}/users/{found_doc_id}"
-        payload = {
-            "fields": {
-                "password": {"stringValue": new_hashed}
-            }
-        }
-        
-        res = requests.patch(url, json=payload, timeout=5)
-        
-        if res.status_code == 200:
+        if success:
             del otp_storage[email_key]
             return {"success": True, "message": "Password reset successfully!"}
         
-        print("Firestore Reset Error Response:", res.text)
         return {"success": False, "message": "Failed to update password in database"}
 
     except Exception as e:
